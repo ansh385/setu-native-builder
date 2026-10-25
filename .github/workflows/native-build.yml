@@ -62,6 +62,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Verify Google Play publishing prerequisites
         if: ${{ inputs.publish_google_play && (env.HAS_PLAY_UPLOAD != 'true' || env.HAS_ANDROID_SIGNING != 'true') }}
         run: echo 'Google Play upload was requested, but Android signing or Play service-account secrets are missing.' && exit 1
