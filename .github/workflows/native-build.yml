@@ -1,0 +1,240 @@
+name: SETU Native Build
+run-name: SETU build ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: SETU build request ID
+        required: true
+        type: string
+      app_name:
+        description: Display name for the mobile app
+        required: true
+        type: string
+      website_url:
+        description: Public HTTPS website URL to wrap
+        required: true
+        type: string
+      platforms:
+        description: Target platform
+        required: true
+        type: choice
+        options: [android, ios, both]
+      android_package_id:
+        description: Android application ID
+        required: true
+        type: string
+      ios_bundle_id:
+        description: iOS bundle identifier
+        required: true
+        type: string
+      publish_google_play:
+        description: Upload signed AAB to Google Play (requires secrets)
+        required: true
+        type: boolean
+        default: false
+      publish_app_store:
+        description: Upload signed IPA to App Store Connect (requires secrets)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android:
+    if: inputs.platforms == 'android' || inputs.platforms == 'both'
+    runs-on: ubuntu-latest
+    env:
+      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+      HAS_PLAY_UPLOAD: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON != '' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Verify Google Play publishing prerequisites
+        if: ${{ inputs.publish_google_play && (env.HAS_PLAY_UPLOAD != 'true' || env.HAS_ANDROID_SIGNING != 'true') }}
+        run: echo 'Google Play upload was requested, but Android signing or Play service-account secrets are missing.' && exit 1
+      - name: Validate website URL
+        env:
+          WEBSITE_URL: ${{ inputs.website_url }}
+        run: |
+          node -e "const u=new URL(process.env.WEBSITE_URL); if(u.protocol!=='https:') throw Error('Only public HTTPS websites are supported for native builds');"
+      - name: Create Capacitor shell
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          WEBSITE_URL: ${{ inputs.website_url }}
+          ANDROID_ID: ${{ inputs.android_package_id }}
+        run: |
+          mkdir mobile-shell && cd mobile-shell
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+          mkdir www
+          printf '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>%s</title></head><body><p>Connecting to your website…</p></body></html>' "$APP_NAME" > www/index.html
+          node -e 'const fs=require("fs"); fs.writeFileSync("capacitor.config.json", JSON.stringify({appId:process.env.ANDROID_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]}},null,2))' 
+          npx cap add android
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: mobile-shell/android
+        run: ./gradlew assembleDebug
+      - name: Upload APK to private artifact storage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          test -n "$R2_ENDPOINT" && test -n "$R2_BUCKET" || (echo 'R2 storage secrets are missing' && exit 1)
+          aws --version || (sudo apt-get update && sudo apt-get install -y awscli)
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp mobile-shell/android/app/build/outputs/apk/debug/app-debug.apk "s3://$R2_BUCKET/builds/$REQUEST_ID/android-debug.apk"
+      - name: Build signed Android App Bundle when release keystore is configured
+        if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/setu-release.keystore"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('mobile-shell/android/app/build.gradle')
+          s = p.read_text()
+          if 'signingConfigs {' not in s:
+              s = s.replace('android {', '''android {
+                  signingConfigs {
+                      release {
+                          storeFile file(System.getenv("RUNNER_TEMP") + "/setu-release.keystore")
+                          storePassword System.getenv("KEYSTORE_PASSWORD")
+                          keyAlias System.getenv("KEY_ALIAS")
+                          keyPassword System.getenv("KEY_PASSWORD")
+                      }
+                  }''', 1)
+          if 'signingConfig signingConfigs.release' not in s:
+              import re
+              s, n = re.subn(r'(buildTypes\s*\{\s*release\s*\{)', r'\1\n            signingConfig signingConfigs.release', s, count=1)
+              if n == 0: raise SystemExit('Could not locate release build type to sign AAB')
+          p.write_text(s)
+          PY
+          cd mobile-shell/android && ./gradlew bundleRelease
+          cd ../..
+          aws --endpoint-url "${{ secrets.R2_ENDPOINT }}" s3 cp mobile-shell/android/app/build/outputs/bundle/release/app-release.aab "s3://${{ secrets.R2_BUCKET }}/builds/${{ inputs.request_id }}/android-release.aab"
+      - name: Upload to Google Play when explicitly requested
+        if: ${{ inputs.publish_google_play && env.HAS_PLAY_UPLOAD == 'true' && env.HAS_ANDROID_SIGNING == 'true' }}
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          echo "$PLAY_JSON" > "$RUNNER_TEMP/play-service-account.json"
+          gem install fastlane --no-document
+          fastlane supply --aab mobile-shell/android/app/build/outputs/bundle/release/app-release.aab --json_key "$RUNNER_TEMP/play-service-account.json" --package_name "${{ inputs.android_package_id }}" --track internal --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true
+
+  ios:
+    if: inputs.platforms == 'ios' || inputs.platforms == 'both'
+    runs-on: macos-14
+    env:
+      HAS_IOS_SIGNING: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' && secrets.IOS_CERTIFICATE_PASSWORD != '' && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' && secrets.IOS_TEAM_ID != '' }}
+      HAS_APP_STORE_UPLOAD: ${{ secrets.APP_STORE_CONNECT_KEY_ID != '' && secrets.APP_STORE_CONNECT_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 != '' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify App Store publishing prerequisites
+        if: ${{ inputs.publish_app_store && (env.HAS_APP_STORE_UPLOAD != 'true' || env.HAS_IOS_SIGNING != 'true') }}
+        run: echo 'App Store upload was requested, but iOS signing or App Store Connect API secrets are missing.' && exit 1
+      - name: Create Capacitor shell
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          WEBSITE_URL: ${{ inputs.website_url }}
+          IOS_ID: ${{ inputs.ios_bundle_id }}
+        run: |
+          mkdir mobile-shell && cd mobile-shell
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/ios@7
+          mkdir www
+          printf '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>%s</title></head><body><p>Connecting to your website…</p></body></html>' "$APP_NAME" > www/index.html
+          node -e 'const fs=require("fs"); fs.writeFileSync("capacitor.config.json", JSON.stringify({appId:process.env.IOS_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]}},null,2))'
+          npx cap add ios
+          npx cap sync ios
+      - name: Build iOS Simulator app
+        run: |
+          xcodebuild -workspace mobile-shell/ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath "$RUNNER_TEMP/setu-derived" CODE_SIGNING_ALLOWED=NO build
+          cd "$RUNNER_TEMP/setu-derived/Build/Products/Debug-iphonesimulator"
+          ditto -c -k --sequesterRsrc --keepParent App.app "$RUNNER_TEMP/ios-simulator.zip"
+      - name: Upload iOS Simulator artifact
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          test -n "$R2_ENDPOINT" && test -n "$R2_BUCKET" || (echo 'R2 storage secrets are missing' && exit 1)
+          brew list awscli >/dev/null 2>&1 || brew install awscli
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp "$RUNNER_TEMP/ios-simulator.zip" "s3://$R2_BUCKET/builds/$REQUEST_ID/ios-simulator.zip"
+      - name: Install signing certificate and provisioning profile
+        if: ${{ env.HAS_IOS_SIGNING == 'true' }}
+        env:
+          CERT_B64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          echo "$CERT_B64" | base64 --decode > "$RUNNER_TEMP/setu-cert.p12"
+          echo "$PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/setu-profile.mobileprovision"
+          security create-keychain -p "$CERT_PASSWORD" "$RUNNER_TEMP/setu.keychain"
+          security unlock-keychain -p "$CERT_PASSWORD" "$RUNNER_TEMP/setu.keychain"
+          security import "$RUNNER_TEMP/setu-cert.p12" -k "$RUNNER_TEMP/setu.keychain" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/setu.keychain"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$RUNNER_TEMP/setu-profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/setu.mobileprovision"
+      - name: Archive and export signed IPA when signing is configured
+        if: ${{ env.HAS_IOS_SIGNING == 'true' }}
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
+        run: |
+          xcodebuild -workspace mobile-shell/ios/App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Setu.xcarchive" DEVELOPMENT_TEAM="$IOS_TEAM_ID" CODE_SIGN_IDENTITY="$IOS_SIGNING_IDENTITY" archive
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>method</key><string>app-store-connect</string><key>teamID</key><string>$IOS_TEAM_ID</string><key>signingStyle</key><string>automatic</string><key>manageAppVersionAndBuildNumber</key><true/></dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Setu.xcarchive" -exportPath "$RUNNER_TEMP/ipa-export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+      - name: Upload signed IPA
+        if: ${{ env.HAS_IOS_SIGNING == 'true' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: aws --endpoint-url "${{ secrets.R2_ENDPOINT }}" s3 cp "$RUNNER_TEMP/ipa-export" "s3://${{ secrets.R2_BUCKET }}/builds/${{ inputs.request_id }}/" --recursive --exclude '*' --include '*.ipa'
+      - name: Upload to App Store Connect when explicitly requested
+        if: ${{ inputs.publish_app_store && env.HAS_APP_STORE_UPLOAD == 'true' && env.HAS_IOS_SIGNING == 'true' }}
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+        run: |
+          echo "$API_KEY_B64" | base64 --decode > "$RUNNER_TEMP/AuthKey_$API_KEY_ID.p8"
+          python3 - <<'PYKEY'
+          import json, os
+          p = os.path.join(os.environ['RUNNER_TEMP'], 'app-store-api-key.json')
+          key_path = os.path.join(os.environ['RUNNER_TEMP'], f"AuthKey_{os.environ['API_KEY_ID']}.p8")
+          with open(key_path) as f: key = f.read()
+          with open(p, 'w') as f: json.dump({'key_id': os.environ['API_KEY_ID'], 'issuer_id': os.environ['API_ISSUER_ID'], 'key': key, 'in_house': False}, f)
+          PYKEY
+          gem install fastlane --no-document
+          IPA_PATH="$(find "$RUNNER_TEMP/ipa-export" -name '*.ipa' -print -quit)"
+          test -n "$IPA_PATH" || (echo 'Signed IPA was not exported' && exit 1)
+          fastlane pilot upload --ipa "$IPA_PATH" --api_key_path "$RUNNER_TEMP/app-store-api-key.json" --skip_waiting_for_build_processing true

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-labelledby="title desc">
+  <title id="title">Setu logo</title>
+  <desc id="desc">A geometric bridge mark with two pillars and an arched crossing, followed by the SETU wordmark.</desc>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M12 43V27L31 10L50 27V43"/>
+    <path d="M19 43V31L31 20L43 31V43"/>
+    <path d="M7 43H55"/>
+    <path d="M21 34H41"/>
+  </g>
+  <path d="M25 34L31 28L37 34" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+  <text x="69" y="35" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" letter-spacing="5">SETU</text>
+  <text x="70" y="50" fill="#AAB1B8" font-family="Arial, Helvetica, sans-serif" font-size="7.5" letter-spacing="2.2">WEB TO MOBILE</text>
+</svg>
