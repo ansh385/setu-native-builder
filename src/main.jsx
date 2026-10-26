@@ -201,11 +201,38 @@ function App() {
     } catch (err) { setNativeBuildError(err.message || 'Could not refresh build status.'); }
   }
 
-  async function shareArtifact(artifact) {
+  async function downloadArtifact(artifact) {
+    if (!buildAccessKey) { setNativeBuildError('Enter your private SETU build access key again to download this artifact.'); return; }
     try {
-      if (navigator.share) await navigator.share({ title: `${appName} download`, text: `Download ${artifact.filename}`, url: artifact.downloadUrl });
-      else { await navigator.clipboard.writeText(artifact.downloadUrl); notify('Expiring download link copied.'); }
-    } catch (err) { if (err.name !== 'AbortError') { try { await navigator.clipboard.writeText(artifact.downloadUrl); notify('Download link copied.'); } catch { notify('Could not share this link from this browser.'); } } }
+      const response = await fetch(artifact.downloadUrl, { headers: { 'x-setu-build-key': buildAccessKey } });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Could not download artifact.');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `${artifact.filename}.zip`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+      notify('Artifact download started. Extract the ZIP to get the APK or other build file.');
+    } catch (err) {
+      setNativeBuildError(err.message || 'Could not download artifact.');
+    }
+  }
+
+  async function shareArtifact(artifact) {
+    const shareUrl = nativeBuildUrl || window.location.href;
+    try {
+      if (navigator.share) await navigator.share({ title: `${appName} build artifact`, text: `Open the GitHub Actions run to access ${artifact.filename}.`, url: shareUrl });
+      else { await navigator.clipboard.writeText(shareUrl); notify('GitHub Actions run link copied.'); }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        try { await navigator.clipboard.writeText(shareUrl); notify('GitHub Actions run link copied.'); }
+        catch { notify('Could not share this link from this browser.'); }
+      }
+    }
   }
 
   function getConfig() {
@@ -441,7 +468,7 @@ ${JSON.stringify(getConfig(), null, 2)}
                   <div className="store-publish-options"><label><input type="checkbox" checked={publishGooglePlay} onChange={event => setPublishGooglePlay(event.target.checked)} disabled={platform === 'ios'} /><span>Upload signed Android AAB to Google Play after build<small>Requires Android release keystore and Play Console service-account secrets.</small></span></label><label><input type="checkbox" checked={publishAppStore} onChange={event => setPublishAppStore(event.target.checked)} disabled={platform === 'android'} /><span>Upload signed iOS IPA to App Store Connect after build<small>Requires Apple signing, provisioning, and App Store Connect API secrets.</small></span></label></div>
                   {nativeBuildError && <div className="build-error" role="alert">{nativeBuildError}</div>}
                   {nativeBuildId && <div className="native-build-status"><div><strong>Build ID</strong><code>{nativeBuildId}</code><span className={`build-status-pill ${nativeBuildStatus}`}>{nativeBuildStatus.replace('_', ' ')}</span></div><button className="outline-button" onClick={refreshNativeBuild}><RefreshCw size={13} /> Refresh status</button>{nativeBuildUrl && <a href={nativeBuildUrl} target="_blank" rel="noreferrer">Open GitHub build logs <ArrowUpRight size={13} /></a>}</div>}
-                  {nativeArtifacts.length > 0 && <div className="native-artifacts"><strong>Ready to download</strong>{nativeArtifacts.map(artifact => <div className="native-artifact" key={artifact.filename}><div><Download size={15} /><span>{artifact.filename}<small>{(artifact.size / 1024 / 1024).toFixed(1)} MB · link expires in 1 hour</small></span></div><a className="artifact-download" href={artifact.downloadUrl}>Download</a><button className="artifact-share" onClick={() => shareArtifact(artifact)} aria-label={`Share ${artifact.filename}`}><ExternalLink size={14} /></button></div>)}</div>}
+                  {nativeArtifacts.length > 0 && <div className="native-artifacts"><strong>Ready to download</strong>{nativeArtifacts.map(artifact => <div className="native-artifact" key={artifact.filename}><div><Download size={15} /><span>{artifact.filename}<small>{(artifact.size / 1024 / 1024).toFixed(1)} MB · retained for 7 days</small></span></div><button className="artifact-download" onClick={() => downloadArtifact(artifact)}>Download ZIP</button><button className="artifact-share" onClick={() => shareArtifact(artifact)} aria-label={`Share ${artifact.filename}`}><ExternalLink size={14} /></button></div>)}</div>}
                   <div className="output-actions"><button className="download-button" onClick={exportConfig}><Download size={15} /> Download config</button><button className="outline-button" onClick={shareSetup}><ExternalLink size={14} /> Share setup</button><button className="outline-button wide-action" onClick={downloadPublishingGuide}><Rocket size={14} /> Publishing guide</button></div>
                   <div className="output-note"><div className="qr-faux" aria-hidden="true"><div className="qr-grid">{Array.from({ length: 81 }, (_, index) => <i key={index} style={{ opacity: ((index * 7 + (index % 5) * 3) % 11) > 4 ? 1 : .15 }} />)}</div></div><div><strong>Native build service</strong><p>Build jobs run on GitHub Actions. Android produces a debug APK; signed AAB and signed iOS IPA require release credentials. iOS Simulator output is for testing only.</p></div></div>
                 </section>
