@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { checkAccess, checkOrigin, json } from '../../_shared.js';
 
 export default async function handler(req, res) {
@@ -46,18 +47,15 @@ export default async function handler(req, res) {
     const artifact = (artifactsData.artifacts || []).find(item => item.name === artifactName && !item.expired);
     if (!artifact) return json(res, 404, { error: 'Artifact not found or it has expired.' });
 
-    const downloadResponse = await fetch(artifact.archive_download_url, {
-      headers,
-      redirect: 'manual'
-    });
-    const location = downloadResponse.headers.get('location');
-    if (downloadResponse.status < 300 || downloadResponse.status >= 400 || !location) {
-      return json(res, 502, { error: 'GitHub did not provide a valid artifact download link.' });
+    const downloadResponse = await fetch(artifact.archive_download_url, { headers, redirect: 'follow' });
+    if (!downloadResponse.ok || !downloadResponse.body) {
+      return json(res, 502, { error: `GitHub artifact download failed (HTTP ${downloadResponse.status}).` });
     }
-    res.statusCode = 302;
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${artifactName}.zip"`);
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Location', location);
-    return res.end();
+    Readable.fromWeb(downloadResponse.body).pipe(res);
   } catch (error) {
     return json(res, 502, { error: `Could not download build artifact: ${error.message}` });
   }
