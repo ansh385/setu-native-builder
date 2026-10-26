@@ -35,5 +35,13 @@ export function validatePayload(body = {}) {
   const idPattern = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
   if (platforms !== 'ios' && !idPattern.test(androidPackageId)) throw new Error('Android package ID is invalid.');
   if (platforms !== 'android' && !idPattern.test(iosBundleId)) throw new Error('iOS bundle ID is invalid.');
-  return { appName, websiteUrl, platforms, androidPackageId, iosBundleId };
+  return {
+    appName,
+    websiteUrl,
+    platforms,
+    androidPackageId,
+    iosBundleId,
+    publishGooglePlay: body.publishGooglePlay === true,
+    publishAppStore: body.publishAppStore === true
+  };
 }
