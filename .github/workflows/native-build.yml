@@ -89,18 +89,13 @@ jobs:
       - name: Build debug APK
         working-directory: mobile-shell/android
         run: ./gradlew assembleDebug
-      - name: Upload APK to private artifact storage
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          REQUEST_ID: ${{ inputs.request_id }}
-        run: |
-          test -n "$R2_ENDPOINT" && test -n "$R2_BUCKET" || (echo 'R2 storage secrets are missing' && exit 1)
-          aws --version || (sudo apt-get update && sudo apt-get install -y awscli)
-          aws --endpoint-url "$R2_ENDPOINT" s3 cp mobile-shell/android/app/build/outputs/apk/debug/app-debug.apk "s3://$R2_BUCKET/builds/$REQUEST_ID/android-debug.apk"
+      - name: Upload Android debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: setu-${{ inputs.request_id }}-android-apk
+          path: mobile-shell/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Build signed Android App Bundle when release keystore is configured
         if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
         env:
@@ -131,8 +126,14 @@ jobs:
           p.write_text(s)
           PY
           cd mobile-shell/android && ./gradlew bundleRelease
-          cd ../..
-          aws --endpoint-url "${{ secrets.R2_ENDPOINT }}" s3 cp mobile-shell/android/app/build/outputs/bundle/release/app-release.aab "s3://${{ secrets.R2_BUCKET }}/builds/${{ inputs.request_id }}/android-release.aab"
+      - name: Upload signed Android App Bundle artifact
+        if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: setu-${{ inputs.request_id }}-android-aab
+          path: mobile-shell/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload to Google Play when explicitly requested
         if: ${{ inputs.publish_google_play && env.HAS_PLAY_UPLOAD == 'true' && env.HAS_ANDROID_SIGNING == 'true' }}
         env:
@@ -177,17 +178,12 @@ jobs:
           cd "$RUNNER_TEMP/setu-derived/Build/Products/Debug-iphonesimulator"
           ditto -c -k --sequesterRsrc --keepParent App.app "$RUNNER_TEMP/ios-simulator.zip"
       - name: Upload iOS Simulator artifact
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          REQUEST_ID: ${{ inputs.request_id }}
-        run: |
-          test -n "$R2_ENDPOINT" && test -n "$R2_BUCKET" || (echo 'R2 storage secrets are missing' && exit 1)
-          brew list awscli >/dev/null 2>&1 || brew install awscli
-          aws --endpoint-url "$R2_ENDPOINT" s3 cp "$RUNNER_TEMP/ios-simulator.zip" "s3://$R2_BUCKET/builds/$REQUEST_ID/ios-simulator.zip"
+        uses: actions/upload-artifact@v4
+        with:
+          name: setu-${{ inputs.request_id }}-ios-simulator
+          path: ${{ runner.temp }}/ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
       - name: Install signing certificate and provisioning profile
         if: ${{ env.HAS_IOS_SIGNING == 'true' }}
         env:
@@ -214,13 +210,14 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>method</key><string>app-store-connect</string><key>teamID</key><string>$IOS_TEAM_ID</string><key>signingStyle</key><string>automatic</string><key>manageAppVersionAndBuildNumber</key><true/></dict></plist>
           PLIST
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Setu.xcarchive" -exportPath "$RUNNER_TEMP/ipa-export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
-      - name: Upload signed IPA
+      - name: Upload signed IPA artifact
         if: ${{ env.HAS_IOS_SIGNING == 'true' }}
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-        run: aws --endpoint-url "${{ secrets.R2_ENDPOINT }}" s3 cp "$RUNNER_TEMP/ipa-export" "s3://${{ secrets.R2_BUCKET }}/builds/${{ inputs.request_id }}/" --recursive --exclude '*' --include '*.ipa'
+        uses: actions/upload-artifact@v4
+        with:
+          name: setu-${{ inputs.request_id }}-ios-ipa
+          path: ${{ runner.temp }}/ipa-export/*.ipa
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload to App Store Connect when explicitly requested
         if: ${{ inputs.publish_app_store && env.HAS_APP_STORE_UPLOAD == 'true' && env.HAS_IOS_SIGNING == 'true' }}
         env:
