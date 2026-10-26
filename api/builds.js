@@ -60,11 +60,11 @@ export default async function handler(req, res) {
   const appIconDataUrl = typeof req.body?.appIconDataUrl === 'string' ? req.body.appIconDataUrl : '';
   const splashDataUrl = typeof req.body?.splashDataUrl === 'string' ? req.body.splashDataUrl : '';
   const validImageDataUrl = value => !value || (
-    value.length <= 700000 &&
+    value.length <= 28000 &&
     /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(value)
   );
 
-  if (!validImageDataUrl(appIconDataUrl) || !validImageDataUrl(splashDataUrl)) {
+  if (appIconDataUrl.length + splashDataUrl.length > 56000 || !validImageDataUrl(appIconDataUrl) || !validImageDataUrl(splashDataUrl)) {
     return json(res, 400, {
       error: 'Custom images must be valid, resized PNG/JPEG data URLs under the build upload limit. Please reselect the images and try again.'
     });
