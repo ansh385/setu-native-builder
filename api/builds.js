@@ -57,6 +57,19 @@ export default async function handler(req, res) {
     `/${encodeURIComponent(GITHUB_REPO)}/actions/workflows/` +
     `${encodeURIComponent(GITHUB_WORKFLOW_ID)}/dispatches`;
 
+  const appIconDataUrl = typeof req.body?.appIconDataUrl === 'string' ? req.body.appIconDataUrl : '';
+  const splashDataUrl = typeof req.body?.splashDataUrl === 'string' ? req.body.splashDataUrl : '';
+  const validImageDataUrl = value => !value || (
+    value.length <= 28000 &&
+    /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(value)
+  );
+
+  if (appIconDataUrl.length + splashDataUrl.length > 56000 || !validImageDataUrl(appIconDataUrl) || !validImageDataUrl(splashDataUrl)) {
+    return json(res, 400, {
+      error: 'Custom images must be valid, resized PNG/JPEG data URLs under the build upload limit. Please reselect the images and try again.'
+    });
+  }
+
   const inputs = {
     request_id: requestId,
     app_name: config.appName,
@@ -67,7 +80,9 @@ export default async function handler(req, res) {
     ios_bundle_id:
       config.iosBundleId || 'com.example.setuapp',
     publish_google_play: config.publishGooglePlay ? 'true' : 'false',
-    publish_app_store: config.publishAppStore ? 'true' : 'false'
+    publish_app_store: config.publishAppStore ? 'true' : 'false',
+    app_icon_data_url: appIconDataUrl,
+    splash_data_url: splashDataUrl
   };
 
   try {
