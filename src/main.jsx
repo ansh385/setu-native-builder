@@ -32,7 +32,6 @@ function App() {
   const [previewPlatform, setPreviewPlatform] = useState('android');
   const [apps, setApps] = useState(starterApps);
   const [toast, setToast] = useState('');
-  const [buildAccessKey, setBuildAccessKey] = useState(() => sessionStorage.getItem('setu-build-access-key') || '');
   const [nativeBuildId, setNativeBuildId] = useState('');
   const [nativeBuildStatus, setNativeBuildStatus] = useState('idle');
   const [nativeBuildUrl, setNativeBuildUrl] = useState('');
@@ -43,11 +42,6 @@ function App() {
   const iconInput = useRef(null);
   const splashInput = useRef(null);
   const validUrl = useMemo(() => isValidWebsiteUrl(url), [url]);
-
-  useEffect(() => {
-    if (buildAccessKey) sessionStorage.setItem('setu-build-access-key', buildAccessKey);
-    else sessionStorage.removeItem('setu-build-access-key');
-  }, [buildAccessKey]);
 
   useEffect(() => {
     const match = window.location.hash.match(/(?:^#|&)setup=([^&]+)/);
@@ -65,12 +59,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!nativeBuildId || !buildAccessKey || !['queued', 'in_progress', 'requested', 'waiting'].includes(nativeBuildStatus)) return undefined;
+    if (!nativeBuildId || !['queued', 'in_progress', 'requested', 'waiting'].includes(nativeBuildStatus)) return undefined;
     let cancelled = false;
     let timer;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/builds/${encodeURIComponent(nativeBuildId)}`, { headers: { 'x-setu-build-key': buildAccessKey } });
+        const response = await fetch(`/api/builds/${encodeURIComponent(nativeBuildId)}`, {});
         const data = await response.json();
         if (cancelled) return;
         if (!response.ok) throw new Error(data.error || 'Could not read build status.');
@@ -93,7 +87,7 @@ function App() {
     };
     timer = window.setTimeout(poll, 2500);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [nativeBuildId, buildAccessKey]);
+  }, [nativeBuildId, nativeBuildStatus]);
 
   function notify(message) {
     setToast(message);
@@ -162,7 +156,6 @@ function App() {
 
   async function startNativeBuild() {
     setError(''); setNativeBuildError(''); setNativeArtifacts([]); setNativeBuildUrl('');
-    if (!buildAccessKey.trim()) { setNativeBuildError('Enter your private SETU build access key. It is stored only in this browser session.'); return; }
     if (!validUrl || !analysed) { setNativeBuildError('Enter a public HTTPS URL and click Validate URL first.'); return; }
     if (new URL(url).protocol !== 'https:') { setNativeBuildError('Native builds currently require an HTTPS website URL.'); return; }
     if (!appName.trim()) { setNativeBuildError('Enter an app name.'); return; }
@@ -172,7 +165,7 @@ function App() {
     try {
       const response = await fetch('/api/builds', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-setu-build-key': buildAccessKey.trim() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appName: appName.trim(), websiteUrl: url.trim(), androidPackageId: androidId.trim(), iosBundleId: iosId.trim(), platforms: platform, publishGooglePlay: publishGooglePlay && platform !== 'ios', publishAppStore: publishAppStore && platform !== 'android' })
       });
       const data = await response.json().catch(() => ({}));
@@ -189,7 +182,7 @@ function App() {
   }
 
   async function refreshNativeBuild() {
-    if (!nativeBuildId || !buildAccessKey) return;
+    if (!nativeBuildId) return;
     setNativeBuildError('');
     try {
       const response = await fetch(`/api/builds/${encodeURIComponent(nativeBuildId)}`, { headers: { 'x-setu-build-key': buildAccessKey } });
@@ -202,9 +195,8 @@ function App() {
   }
 
   async function downloadArtifact(artifact) {
-    if (!buildAccessKey) { setNativeBuildError('Enter your private SETU build access key again to download this artifact.'); return; }
     try {
-      const response = await fetch(artifact.downloadUrl, { headers: { 'x-setu-build-key': buildAccessKey } });
+      const response = await fetch(artifact.downloadUrl);
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'Could not download artifact.');
@@ -464,7 +456,7 @@ ${JSON.stringify(getConfig(), null, 2)}
                 <section className="panel output-panel">
                   <div className="side-panel-heading"><div className="side-icon cube"><Box size={19} /></div><div><h3>Build output</h3><p>Native build status</p></div><span className="status">Remote</span></div>
                   <div className="output-message">{buildMessage}</div>
-                  <label className="build-key-label">Private build access key <input type="password" value={buildAccessKey} onChange={event => setBuildAccessKey(event.target.value)} placeholder="Enter your Vercel SETU_BUILD_ACCESS_KEY" autoComplete="off" /><small>For self-hosted deployments. Stored in this browser session only; never put GitHub or store credentials here.</small></label>
+                  <div className="side-note"><ShieldCheck size={18} /><span><strong>Public build service</strong><br />No secret key needed. Build access is managed securely by SETU.</span></div>
                   <div className="store-publish-options"><label><input type="checkbox" checked={publishGooglePlay} onChange={event => setPublishGooglePlay(event.target.checked)} disabled={platform === 'ios'} /><span>Upload signed Android AAB to Google Play after build<small>Requires Android release keystore and Play Console service-account secrets.</small></span></label><label><input type="checkbox" checked={publishAppStore} onChange={event => setPublishAppStore(event.target.checked)} disabled={platform === 'android'} /><span>Upload signed iOS IPA to App Store Connect after build<small>Requires Apple signing, provisioning, and App Store Connect API secrets.</small></span></label></div>
                   {nativeBuildError && <div className="build-error" role="alert">{nativeBuildError}</div>}
                   {nativeBuildId && <div className="native-build-status"><div><strong>Build ID</strong><code>{nativeBuildId}</code><span className={`build-status-pill ${nativeBuildStatus}`}>{nativeBuildStatus.replace('_', ' ')}</span></div><button className="outline-button" onClick={refreshNativeBuild}><RefreshCw size={13} /> Refresh status</button>{nativeBuildUrl && <a href={nativeBuildUrl} target="_blank" rel="noreferrer">Open GitHub build logs <ArrowUpRight size={13} /></a>}</div>}
