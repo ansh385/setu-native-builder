@@ -95,7 +95,7 @@ jobs:
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
           mkdir www
           printf '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>%s</title></head><body><p>Connecting to your website…</p></body></html>' "$APP_NAME" > www/index.html
-          node -e 'const fs=require("fs"); fs.writeFileSync("capacitor.config.json", JSON.stringify({appId:process.env.ANDROID_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]},plugins:{SplashScreen:{launchShowDuration:2000,launchAutoHide:true,backgroundColor:"#0B0A09",androidScaleType:"CENTER_CROP",showSpinner:false}}},null,2))'
+          node -e 'const fs=require("fs"); const c={appId:process.env.ANDROID_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]}}; if(process.env.SPLASH_DATA_URL) c.plugins={SplashScreen:{launchShowDuration:2000,launchAutoHide:true,backgroundColor:"#0B0A09",androidScaleType:"CENTER_CROP",showSpinner:false}}; fs.writeFileSync("capacitor.config.json",JSON.stringify(c,null,2))'
           npx cap add android
           npx cap sync android
       - name: Apply optional Android app icon and splash screen
@@ -105,7 +105,7 @@ jobs:
           APP_ICON_DATA_URL: ${{ inputs.app_icon_data_url }}
           SPLASH_DATA_URL: ${{ inputs.splash_data_url }}
         run: |
-          npm install --no-save @capacitor/assets@3 sharp
+          npm install --no-save @capacitor/assets@3 @capacitor/splash-screen@7 sharp
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import sharp from 'sharp';
