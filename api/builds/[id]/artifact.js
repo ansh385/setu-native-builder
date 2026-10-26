@@ -4,7 +4,7 @@ import { checkAccess, checkOrigin, json } from '../../_shared.js';
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed.' });
   if (!checkOrigin(req)) return json(res, 403, { error: 'Origin is not allowed.' });
-  if (!checkAccess(req)) return json(res, 401, { error: 'Build access key is missing or invalid.' });
+  if (!checkAccess(req)) return json(res, 401, { error: 'Public builds are disabled. Configure SETU_PUBLIC_BUILDS=true in Vercel.' });
 
   const requestId = String(req.query.id || '');
   const artifactName = String(req.query.name || '');
