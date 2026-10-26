@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
   if (!checkAccess(req)) {
     return json(res, 401, {
-      error: 'Build access key is missing or invalid. Configure a private SETU build key in Vercel and enter it in the SETU builder.'
+      error: 'Public builds are disabled. Set SETU_PUBLIC_BUILDS=true in Vercel, or configure a private build key for self-hosted use.'
     });
   }
 
