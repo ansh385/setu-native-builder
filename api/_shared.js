@@ -5,6 +5,7 @@ export function json(res, status, data) {
 }
 
 export function checkAccess(req) {
+  if (process.env.SETU_PUBLIC_BUILDS === 'true') return true;
   const expected = process.env.SETU_BUILD_ACCESS_KEY;
   const provided = req.headers['x-setu-build-key'];
   if (!expected || !provided) return false;
