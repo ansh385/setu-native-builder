@@ -162,8 +162,8 @@ function App() {
       image.onload = resolve;
       image.onerror = () => reject(new Error('Could not prepare the selected branding image.'));
     });
-    const maxWidth = target === 'icon' ? 512 : 720;
-    const maxHeight = target === 'icon' ? 512 : 1280;
+    const maxWidth = target === 'icon' ? 256 : 360;
+    const maxHeight = target === 'icon' ? 256 : 640;
     const scale = Math.min(1, maxWidth / image.naturalWidth, maxHeight / image.naturalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -171,9 +171,11 @@ function App() {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Your browser could not prepare the branding image.');
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const compressed = canvas.toDataURL('image/jpeg', target === 'icon' ? 0.84 : 0.78);
-    if (compressed.length > 650000) throw new Error('This image is too detailed to upload. Choose a smaller image and try again.');
-    return compressed;
+    for (const quality of [0.72, 0.62, 0.52, 0.42, 0.32]) {
+      const compressed = canvas.toDataURL('image/jpeg', quality);
+      if (compressed.length <= 28000) return compressed;
+    }
+    throw new Error('This image could not be compressed enough for the build service. Choose a simpler image.');
   }
 
   async function startNativeBuild() {
