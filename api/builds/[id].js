@@ -3,7 +3,7 @@ import { json, checkAccess, checkOrigin } from '../_shared.js';
 export default async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed.' });
   if (!checkOrigin(req)) return json(res, 403, { error: 'Origin is not allowed.' });
-  if (!checkAccess(req)) return json(res, 401, { error: 'Build access key is missing or invalid.' });
+  if (!checkAccess(req)) return json(res, 401, { error: 'Public builds are disabled. Configure SETU_PUBLIC_BUILDS=true in Vercel.' });
 
   const requestId = String(req.query.id || '');
   if (!/^[0-9a-f-]{36}$/i.test(requestId) && !/^[a-zA-Z0-9._-]{1,80}$/.test(requestId)) {
