@@ -185,7 +185,7 @@ function App() {
     if (!nativeBuildId) return;
     setNativeBuildError('');
     try {
-      const response = await fetch(`/api/builds/${encodeURIComponent(nativeBuildId)}`, { headers: { 'x-setu-build-key': buildAccessKey } });
+      const response = await fetch(`/api/builds/${encodeURIComponent(nativeBuildId)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not refresh build status.');
       setNativeBuildStatus(data.status || 'queued'); setNativeBuildUrl(data.runUrl || ''); setNativeArtifacts(data.artifacts || []);
