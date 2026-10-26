@@ -154,6 +154,28 @@ function App() {
     }, 450);
   }
 
+  async function prepareImageForBuild(dataUrl, target) {
+    if (!dataUrl) return '';
+    const image = new Image();
+    image.src = dataUrl;
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('Could not prepare the selected branding image.'));
+    });
+    const maxWidth = target === 'icon' ? 512 : 720;
+    const maxHeight = target === 'icon' ? 512 : 1280;
+    const scale = Math.min(1, maxWidth / image.naturalWidth, maxHeight / image.naturalHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser could not prepare the branding image.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const compressed = canvas.toDataURL('image/jpeg', target === 'icon' ? 0.84 : 0.78);
+    if (compressed.length > 650000) throw new Error('This image is too detailed to upload. Choose a smaller image and try again.');
+    return compressed;
+  }
+
   async function startNativeBuild() {
     setError(''); setNativeBuildError(''); setNativeArtifacts([]); setNativeBuildUrl('');
     if (!validUrl || !analysed) { setNativeBuildError('Enter a public HTTPS URL and click Validate URL first.'); return; }
@@ -161,12 +183,16 @@ function App() {
     if (!appName.trim()) { setNativeBuildError('Enter an app name.'); return; }
     if (platform !== 'ios' && !isValidAndroidId(androidId)) { setNativeBuildError('Android package ID is invalid.'); return; }
     if (platform !== 'android' && !isValidIosBundleId(iosId)) { setNativeBuildError('iOS bundle ID is invalid.'); return; }
-    setBusy(true); setNativeBuildStatus('requested'); setBuildMessage('Submitting a real native build to GitHub Actions…');
+    setBusy(true); setNativeBuildStatus('requested'); setBuildMessage('Preparing optional branding assets and submitting the native build…');
     try {
+      const [appIconDataUrl, splashDataUrl] = await Promise.all([
+        prepareImageForBuild(appIcon, 'icon'),
+        prepareImageForBuild(splash, 'splash')
+      ]);
       const response = await fetch('/api/builds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appName: appName.trim(), websiteUrl: url.trim(), androidPackageId: androidId.trim(), iosBundleId: iosId.trim(), platforms: platform, publishGooglePlay: publishGooglePlay && platform !== 'ios', publishAppStore: publishAppStore && platform !== 'android' })
+        body: JSON.stringify({ appName: appName.trim(), websiteUrl: url.trim(), androidPackageId: androidId.trim(), iosBundleId: iosId.trim(), platforms: platform, publishGooglePlay: publishGooglePlay && platform !== 'ios', publishAppStore: publishAppStore && platform !== 'android', appIconDataUrl, splashDataUrl })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Build request failed (${response.status}).`);
