@@ -17,9 +17,29 @@ export function checkAccess(req) {
 export function checkOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true; // CLI/automation requests still require the access key.
-  const allowed = (process.env.SETU_ALLOWED_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean);
-  if (allowed.length === 0) return false;
-  return allowed.includes(origin);
+
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  // Never allow non-HTTPS browser origins.
+  if (parsedOrigin.protocol !== 'https:') return false;
+
+  const allowed = (process.env.SETU_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  if (allowed.includes(parsedOrigin.origin)) return true;
+
+  // Vercel generates a unique hostname for each deployment. Allow only this
+  // project's deployment hostnames, not arbitrary *.vercel.app origins.
+  const hostname = parsedOrigin.hostname.toLowerCase();
+  return hostname.startsWith('setu-native-builder-') &&
+    hostname.endsWith('-ansh385s-projects.vercel.app');
 }
 
 export function validatePayload(body = {}) {
@@ -33,7 +53,7 @@ export function validatePayload(body = {}) {
   if (parsed.protocol !== 'https:' || !parsed.hostname.includes('.')) throw new Error('Website URL must use public HTTPS for a native build.');
   if (!appName || appName.length > 50) throw new Error('App name is required and must be 50 characters or fewer.');
   if (!['android', 'ios', 'both'].includes(platforms)) throw new Error('Choose Android, iOS, or both.');
-  const idPattern = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+  const idPattern = /^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$/;
   if (platforms !== 'ios' && !idPattern.test(androidPackageId)) throw new Error('Android package ID is invalid.');
   if (platforms !== 'android' && !idPattern.test(iosBundleId)) throw new Error('iOS bundle ID is invalid.');
   return {
