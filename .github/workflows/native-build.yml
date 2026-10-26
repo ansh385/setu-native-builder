@@ -39,6 +39,16 @@ on:
         required: true
         type: boolean
         default: false
+      app_icon_data_url:
+        description: Optional compressed app icon image data
+        required: false
+        type: string
+        default: ''
+      splash_data_url:
+        description: Optional compressed splash screen image data
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -77,14 +87,42 @@ jobs:
           APP_NAME: ${{ inputs.app_name }}
           WEBSITE_URL: ${{ inputs.website_url }}
           ANDROID_ID: ${{ inputs.android_package_id }}
+          APP_ICON_DATA_URL: ${{ inputs.app_icon_data_url }}
+          SPLASH_DATA_URL: ${{ inputs.splash_data_url }}
         run: |
           mkdir mobile-shell && cd mobile-shell
           npm init -y
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
           mkdir www
           printf '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>%s</title></head><body><p>Connecting to your website…</p></body></html>' "$APP_NAME" > www/index.html
-          node -e 'const fs=require("fs"); fs.writeFileSync("capacitor.config.json", JSON.stringify({appId:process.env.ANDROID_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]}},null,2))' 
+          node -e 'const fs=require("fs"); fs.writeFileSync("capacitor.config.json", JSON.stringify({appId:process.env.ANDROID_ID,appName:process.env.APP_NAME,webDir:"www",server:{url:process.env.WEBSITE_URL,cleartext:false,allowNavigation:[new URL(process.env.WEBSITE_URL).hostname]},plugins:{SplashScreen:{launchShowDuration:2000,launchAutoHide:true,backgroundColor:"#0B0A09",androidScaleType:"CENTER_CROP",showSpinner:false}}},null,2))'
           npx cap add android
+          npx cap sync android
+      - name: Apply optional Android app icon and splash screen
+        if: ${{ inputs.app_icon_data_url != '' || inputs.splash_data_url != '' }}
+        working-directory: mobile-shell
+        env:
+          APP_ICON_DATA_URL: ${{ inputs.app_icon_data_url }}
+          SPLASH_DATA_URL: ${{ inputs.splash_data_url }}
+        run: |
+          npm install --no-save @capacitor/assets@3 sharp
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import sharp from 'sharp';
+          fs.mkdirSync('assets', { recursive: true });
+          async function writeImage(dataUrl, target, width, height, fit) {
+            if (!dataUrl) return;
+            const match = dataUrl.match(/^data:image\\/(?:jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
+            if (!match) throw new Error('Invalid image data received for ' + target);
+            await sharp(Buffer.from(match[1], 'base64'))
+              .resize(width, height, { fit, background: '#0B0A09' })
+              .png()
+              .toFile(target);
+          }
+          await writeImage(process.env.APP_ICON_DATA_URL, 'assets/icon.png', 1024, 1024, 'cover');
+          await writeImage(process.env.SPLASH_DATA_URL, 'assets/splash.png', 2732, 2732, 'contain');
+          NODE
+          npx capacitor-assets generate --android
           npx cap sync android
       - name: Build debug APK
         working-directory: mobile-shell/android
