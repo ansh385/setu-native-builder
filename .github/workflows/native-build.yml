@@ -112,7 +112,7 @@ jobs:
           fs.mkdirSync('assets', { recursive: true });
           async function writeImage(dataUrl, target, width, height, fit) {
             if (!dataUrl) return;
-            const match = dataUrl.match(/^data:image\\/(?:jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
+            const match = dataUrl.match(/^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
             if (!match) throw new Error('Invalid image data received for ' + target);
             await sharp(Buffer.from(match[1], 'base64'))
               .resize(width, height, { fit, background: '#0B0A09' })
