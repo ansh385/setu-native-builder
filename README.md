@@ -30,35 +30,52 @@ Vercel is the request/status/download-proxy API, not the native compiler. GitHub
 
 
 
-## GitHub Actions: how native builds run
+## End-to-end guide: website URL → GitHub Actions → APK download
 
-SETU does not compile Android or iOS apps inside the browser or on Vercel. The Vercel API sends a `workflow_dispatch` request to the repository workflow at `.github/workflows/native-build.yml`. GitHub Actions provisions the appropriate runner, creates a temporary Capacitor project, builds the requested target, and uploads the result as a workflow artifact.
+Use this guide when you want to create an Android APK from your website using the live SETU builder.
 
-### Build flow
+### Part A — Submit your website in SETU
 
-1. A user enters the public HTTPS website URL and app details in SETU.
-2. The frontend sends the request to the Vercel API.
-3. The API validates the request and uses the server-side `GITHUB_BUILD_TOKEN` to dispatch the `native-build.yml` workflow.
-4. GitHub Actions runs the build on Ubuntu for Android and macOS for iOS.
-5. The workflow uploads the generated file(s) to that workflow run using `actions/upload-artifact@v4`.
-6. SETU checks the run/artifact status and provides an authenticated download through the Vercel API. You can also download artifacts directly from the GitHub Actions run page.
+1. Open the live builder: **https://setu-native-builder.vercel.app/**
+2. Find **Enter website URL** and enter your full public website address, including `https://`. Example: `https://yourwebsite.com`.
+3. Tap/click **Validate URL**. This checks URL syntax only; it does not prove the website is online or compatible with Android WebView.
+4. In **App configuration**, set:
+   - **App name** — the name shown for the app (up to 50 characters).
+   - **Android package ID** — use a unique reverse-domain ID such as `com.yourname.yoursite`. Use lowercase letters/numbers and dots for a typical ID; do not reuse another app's ID.
+   - **iOS bundle ID** — required by the current form when Android + iOS or iOS is selected. If building Android only, it is not used by the Android workflow.
+   - **App icon** and **Splash screen** are optional in the UI, but the current main-branch build workflow does not apply custom icon/splash uploads to the APK. Do not rely on these images appearing in the output.
+5. Under **Choose your platform**, select **Android** to build an APK only. Select **Both platforms** only if you also want an iOS Simulator build.
+6. Leave the Google Play and App Store upload checkboxes off unless the corresponding signing and store credentials have been configured by the project owner.
+7. Press **Build native app**. SETU submits the request to its Vercel API, which dispatches the `SETU Native Build` workflow in GitHub Actions. Keep the SETU page open so it can poll for status and show download links.
 
-### Run a build manually in GitHub
+### Part B — Watch the build in GitHub Actions
+
+1. Open the SETU repository: **https://github.com/ansh385/setu-native-builder**
+2. Select the **Actions** tab.
+3. Open the newest run named **SETU build <request ID>** / **SETU Native Build**. You can also use the **Open GitHub build logs** link in SETU's **Build output** panel after the run appears.
+4. Open the run details and watch the **android** job. A normal run checks the HTTPS URL, creates a temporary Capacitor Android project, runs Gradle to build a debug APK, and uploads the APK as an artifact.
+5. Wait until the run finishes. The run must show a successful conclusion before the artifact can be downloaded. If it fails, open the failed step and read its log; common causes include an invalid URL, an incompatible website/build environment, or GitHub configuration/permissions.
+
+### Part C — Download the APK from GitHub
+
+1. On the completed successful workflow run page, scroll to the **Artifacts** section near the bottom.
+2. Select the artifact named like `setu-<request_id>-android-apk`. GitHub downloads a ZIP file; the artifact is not itself the APK file.
+3. On your computer or Android device, open/extract the downloaded ZIP.
+4. Inside the extracted folder, locate **`app-debug.apk`**.
+5. Transfer/open `app-debug.apk` on your Android phone and install it. Android may ask you to allow installation from that browser or file manager; only proceed if you trust the APK and built it yourself.
+6. Launch the app and test navigation, login, forms, links, and any other important features. The wrapper loads the website; it does not automatically convert the website's backend or make every website feature native.
+
+**Alternative:** When SETU shows **Ready to download**, use the artifact's **Download ZIP** button in the SETU **Build output** panel. Extract the downloaded ZIP and install `app-debug.apk` as described above. The **Open GitHub build logs** link opens the same workflow run for troubleshooting.
+
+### Run a workflow manually (fallback)
+
+Use this only if you intentionally want to start a run from GitHub rather than submitting through SETU:
 
 1. Open the repository's **Actions** tab.
-2. Select **SETU Native Build**.
-3. Click **Run workflow** and select the branch containing `.github/workflows/native-build.yml`.
-4. Fill in all required inputs:
-   - `request_id`: unique identifier for this run.
-   - `app_name`: name shown for the app.
-   - `website_url`: public website URL using HTTPS.
-   - `platforms`: `android`, `ios`, or `both`.
-   - `android_package_id`: Android application ID, such as `com.example.myapp`.
-   - `ios_bundle_id`: iOS bundle identifier, such as `com.example.myapp`.
-   - `publish_google_play`: keep `false` unless signing and Play Console secrets are configured.
-   - `publish_app_store`: keep `false` unless Apple signing and App Store Connect secrets are configured.
-5. Click **Run workflow**, open the new run, and monitor the job and step logs.
-6. When the run succeeds, open **Artifacts** at the bottom of the run summary and download the required artifact.
+2. Select **SETU Native Build** and click **Run workflow**.
+3. Select the branch containing `.github/workflows/native-build.yml`.
+4. Fill the required inputs: `request_id`, `app_name`, `website_url`, `platforms`, `android_package_id`, and `ios_bundle_id`. Use a unique request ID, a public HTTPS website URL, and `android` for APK-only output. Keep both publishing inputs set to `false` unless publishing is fully configured.
+5. Click **Run workflow**, open the new run, wait for success, then download `setu-<request_id>-android-apk` from the **Artifacts** section and extract `app-debug.apk`.
 
 ### Artifacts produced by the current workflow
 
