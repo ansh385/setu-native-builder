@@ -28,6 +28,65 @@ Vercel serverless API -----> GitHub Actions workflow_dispatch
 
 Vercel is the request/status/download-proxy API, not the native compiler. GitHub Actions is the build runner and artifact store. Build outputs are not committed to the Git repository or stored on the Vercel function filesystem.
 
+
+
+## GitHub Actions: how native builds run
+
+SETU does not compile Android or iOS apps inside the browser or on Vercel. The Vercel API sends a `workflow_dispatch` request to the repository workflow at `.github/workflows/native-build.yml`. GitHub Actions provisions the appropriate runner, creates a temporary Capacitor project, builds the requested target, and uploads the result as a workflow artifact.
+
+### Build flow
+
+1. A user enters the public HTTPS website URL and app details in SETU.
+2. The frontend sends the request to the Vercel API.
+3. The API validates the request and uses the server-side `GITHUB_BUILD_TOKEN` to dispatch the `native-build.yml` workflow.
+4. GitHub Actions runs the build on Ubuntu for Android and macOS for iOS.
+5. The workflow uploads the generated file(s) to that workflow run using `actions/upload-artifact@v4`.
+6. SETU checks the run/artifact status and provides an authenticated download through the Vercel API. You can also download artifacts directly from the GitHub Actions run page.
+
+### Run a build manually in GitHub
+
+1. Open the repository's **Actions** tab.
+2. Select **SETU Native Build**.
+3. Click **Run workflow** and select the branch containing `.github/workflows/native-build.yml`.
+4. Fill in all required inputs:
+   - `request_id`: unique identifier for this run.
+   - `app_name`: name shown for the app.
+   - `website_url`: public website URL using HTTPS.
+   - `platforms`: `android`, `ios`, or `both`.
+   - `android_package_id`: Android application ID, such as `com.example.myapp`.
+   - `ios_bundle_id`: iOS bundle identifier, such as `com.example.myapp`.
+   - `publish_google_play`: keep `false` unless signing and Play Console secrets are configured.
+   - `publish_app_store`: keep `false` unless Apple signing and App Store Connect secrets are configured.
+5. Click **Run workflow**, open the new run, and monitor the job and step logs.
+6. When the run succeeds, open **Artifacts** at the bottom of the run summary and download the required artifact.
+
+### Artifacts produced by the current workflow
+
+| Target | Artifact name pattern | Output and requirements |
+| --- | --- | --- |
+| Android testing | `setu-<request_id>-android-apk` | Debug APK; suitable for installing and testing on Android. |
+| Android release bundle | `setu-<request_id>-android-aab` | Signed AAB only when all Android keystore secrets are configured. |
+| iOS Simulator | `setu-<request_id>-ios-simulator` | ZIP containing a Simulator `.app`; not an installable iPhone IPA. |
+| iOS device | `setu-<request_id>-ios-ipa` | Signed IPA only when iOS signing/provisioning is configured. |
+
+Artifacts are retained for **7 days**. Download and save a needed build before it expires. The current workflow uses GitHub Actions artifact storage; it does not require Cloudflare R2. GitHub Actions minutes, storage, and repository limits still apply.
+
+### GitHub configuration required
+
+- Enable GitHub Actions for the repository.
+- Keep `.github/workflows/native-build.yml` on the branch selected by `GITHUB_BUILD_REF` (defaults to `main`).
+- The token used by Vercel needs repository **Actions: read and write** and **Metadata: read** permissions.
+- Configure `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_WORKFLOW_ID`, and `GITHUB_BUILD_TOKEN` in Vercel's server-side environment variables. Use `GITHUB_WORKFLOW_ID=native-build.yml`.
+- Never put the GitHub token in frontend code, a `VITE_*` variable, README, screenshots, or a public issue. If a token is exposed, revoke it and create a replacement.
+
+### What the workflow does not guarantee
+
+- A successful build does not guarantee that every website will behave correctly inside a mobile WebView.
+- Only public HTTPS websites are accepted by the workflow. Login/OAuth flows, popups, downloads, camera/location access, and other browser-specific features may need additional configuration or testing.
+- A debug APK is for testing, not a Play Store release. Store publishing is optional and should remain disabled until signing, store credentials, listing, and policy requirements are ready.
+- iOS Simulator output cannot be installed on a physical iPhone. A physical-device IPA requires valid Apple signing and provisioning.
+- Public build access can consume the owner's GitHub Actions quota. Before operating SETU as a public multi-user service, add proper user authentication, quotas, abuse controls, and queueing.
+
 ## Local UI
 
 Requirements: Node.js 20+ and npm.
